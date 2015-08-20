@@ -1,3 +1,7 @@
+// Copyright (C) 2015 Alex Sergeyev
+// This project is licensed under the terms of the MIT license.
+// Read LICENSE file for information for all notices and permissions.
+
 package nradix
 
 import "errors"
