@@ -33,9 +33,23 @@ func TestTree(t *testing.T) {
 	if inf.(int) != 1 {
 		t.Errorf("Wrong value, expected 1, got %v", inf)
 	}
+	inf, err = tr.FindCIDR("1.2.3.60")
+	if err != nil {
+		t.Error(err)
+	}
+	if inf.(int) != 1 {
+		t.Errorf("Wrong value, expected 1, got %v", inf)
+	}
 
 	// Outside defined cidr
 	inf, err = tr.FindCIDR("1.2.3.160/32")
+	if err != nil {
+		t.Error(err)
+	}
+	if inf != nil {
+		t.Errorf("Wrong value, expected nil, got %v", inf)
+	}
+	inf, err = tr.FindCIDR("1.2.3.160")
 	if err != nil {
 		t.Error(err)
 	}
@@ -94,6 +108,60 @@ func TestTree(t *testing.T) {
 	}
 	if inf.(int) != 2 {
 		t.Errorf("Wrong value, expected 2, got %v", inf)
+	}
+
+}
+
+func TestTree6(t *testing.T) {
+	tr := NewTree(0)
+	if tr == nil || tr.root == nil {
+		t.Error("Did not create tree properly")
+	}
+	err := tr.AddCIDR("dead::0/16", 3)
+	if err != nil {
+		t.Error(err)
+	}
+
+	// Matching defined cidr
+	inf, err := tr.FindCIDR("dead::beef")
+	if err != nil {
+		t.Error(err)
+	}
+	if inf.(int) != 3 {
+		t.Errorf("Wrong value, expected 3, got %v", inf)
+	}
+
+	// Outside
+	inf, err = tr.FindCIDR("deed::beef/32")
+	if err != nil {
+		t.Error(err)
+	}
+	if inf != nil {
+		t.Errorf("Wrong value, expected nil, got %v", inf)
+	}
+
+	// Subnet
+	err = tr.AddCIDR("dead:beef::0/48", 4)
+	if err != nil {
+		t.Error(err)
+	}
+
+	// Match defined subnet
+	inf, err = tr.FindCIDR("dead:beef::0a5c:0/64")
+	if err != nil {
+		t.Error(err)
+	}
+	if inf.(int) != 4 {
+		t.Errorf("Wrong value, expected 4, got %v", inf)
+	}
+
+	// Match outside defined subnet
+	inf, err = tr.FindCIDR("dead:0::beef:0a5c:0/64")
+	if err != nil {
+		t.Error(err)
+	}
+	if inf.(int) != 3 {
+		t.Errorf("Wrong value, expected 3, got %v", inf)
 	}
 
 }

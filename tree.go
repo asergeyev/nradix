@@ -6,6 +6,7 @@ package nradix
 
 import (
 	"errors"
+	"net"
 	"strings"
 )
 
@@ -14,14 +15,18 @@ type node struct {
 	value               interface{}
 }
 
-// Tree implements radix tree for working with IP/mask
+// Tree implements radix tree for working with IP/mask. Thread safety is not guaranteed, you should choose your own style of protecting safety of operations.
 type Tree struct {
-	root   *node
-	free   *node
-	has128 bool
+	root *node
+	free *node
+
+	alloc []node
 }
 
-const startbit = uint32(0x80000000)
+const (
+	startbit  = uint32(0x80000000)
+	startbyte = byte(0x80)
+)
 
 var (
 	ErrNodeBusy = errors.New("Node Busy")
@@ -62,31 +67,51 @@ func NewTree(preallocate int) *Tree {
 }
 
 // AddCIDR adds value associated with IP/mask to the tree. Will return error for invalid CIDR or if value already exists.
-// Note: Only IPV4 supported so far...
 func (tree *Tree) AddCIDR(cidr string, val interface{}) error {
-	ip, mask, err := parsecidr4(cidr)
+	if strings.IndexByte(cidr, '.') > 0 {
+		ip, mask, err := parsecidr4(cidr)
+		if err != nil {
+			return err
+		}
+		return tree.insert32(ip, mask, val)
+	}
+	ip, mask, err := parsecidr6(cidr)
 	if err != nil {
 		return err
 	}
-	return tree.insert32(ip, mask, val)
+	return tree.insert(ip, mask, val)
 }
 
 // DeleteCIDR removes value associated with IP/mask from the tree.
 func (tree *Tree) DeleteCIDR(cidr string) error {
-	ip, mask, err := parsecidr4(cidr)
+	if strings.IndexByte(cidr, '.') > 0 {
+		ip, mask, err := parsecidr4(cidr)
+		if err != nil {
+			return err
+		}
+		return tree.delete32(ip, mask)
+	}
+	ip, mask, err := parsecidr6(cidr)
 	if err != nil {
 		return err
 	}
-	return tree.delete32(ip, mask)
+	return tree.delete(ip, mask)
 }
 
 // Find CIDR traverses tree to proper Node and returns previously saved information in longest covered IP.
 func (tree *Tree) FindCIDR(cidr string) (interface{}, error) {
-	ip, mask, err := parsecidr4(cidr)
+	if strings.IndexByte(cidr, '.') > 0 {
+		ip, mask, err := parsecidr4(cidr)
+		if err != nil {
+			return nil, err
+		}
+		return tree.find32(ip, mask), nil
+	}
+	ip, mask, err := parsecidr6(cidr)
 	if err != nil {
 		return nil, err
 	}
-	return tree.find32(ip, mask), nil
+	return tree.find(ip, mask), nil
 }
 
 func (tree *Tree) insert32(key, mask uint32, value interface{}) error {
@@ -122,6 +147,64 @@ func (tree *Tree) insert32(key, mask uint32, value interface{}) error {
 		}
 		bit >>= 1
 		node = next
+	}
+	node.value = value
+
+	return nil
+}
+
+func (tree *Tree) insert(key net.IP, mask net.IPMask, value interface{}) error {
+	if len(key) != len(mask) {
+		return ErrBadIP
+	}
+
+	var i int
+	bit := startbyte
+	node := tree.root
+	next := tree.root
+	for bit&mask[i] != 0 {
+		if key[i]&bit != 0 {
+			next = node.right
+		} else {
+			next = node.left
+		}
+		if next == nil {
+			break
+		}
+
+		node = next
+
+		if bit >>= 1; bit == 0 {
+			if i++; i == len(key) {
+				break
+			}
+			bit = startbyte
+		}
+
+	}
+	if next != nil {
+		if node.value != nil {
+			return ErrNodeBusy
+		}
+		node.value = value
+		return nil
+	}
+
+	for bit&mask[i] != 0 {
+		next = tree.newnode()
+		next.parent = node
+		if key[i]&bit != 0 {
+			node.right = next
+		} else {
+			node.left = next
+		}
+		node = next
+		if bit >>= 1; bit == 0 {
+			if i++; i == len(key) {
+				break
+			}
+			bit = startbyte
+		}
 	}
 	node.value = value
 
@@ -176,6 +259,66 @@ func (tree *Tree) delete32(key, mask uint32) error {
 	return nil
 }
 
+func (tree *Tree) delete(key net.IP, mask net.IPMask) error {
+	if len(key) != len(mask) {
+		return ErrBadIP
+	}
+
+	var i int
+	bit := startbyte
+	node := tree.root
+	for node != nil && bit&mask[i] != 0 {
+		if key[i]&bit != 0 {
+			node = node.right
+		} else {
+			node = node.left
+		}
+		if bit >>= 1; bit == 0 {
+			if i++; i == len(key) {
+				break
+			}
+			bit = startbyte
+		}
+	}
+	if node == nil {
+		return ErrNotFound
+	}
+
+	if node.right != nil && node.left != nil {
+		// keep it just trim value
+		if node.value != nil {
+			node.value = nil
+			return nil
+		}
+		return ErrNotFound
+	}
+
+	// need to trim leaf
+	for {
+		if node.parent.right == node {
+			node.parent.right = nil
+		} else {
+			node.parent.left = nil
+		}
+		// reserve this node for future use
+		node.right = tree.free
+		tree.free = node
+		node.value = nil
+
+		// move to parent, check if it's free of value and children
+		node = node.parent
+		if node.right != nil || node.left != nil || node.value != nil {
+			break
+		}
+		// do not delete root node
+		if node.parent == nil {
+			break
+		}
+	}
+
+	return nil
+}
+
 func (tree *Tree) find32(key, mask uint32) (value interface{}) {
 	bit := startbit
 	node := tree.root
@@ -197,15 +340,50 @@ func (tree *Tree) find32(key, mask uint32) (value interface{}) {
 	return value
 }
 
+func (tree *Tree) find(key net.IP, mask net.IPMask) (value interface{}) {
+	if len(key) != len(mask) {
+		return ErrBadIP
+	}
+	var i int
+	bit := startbyte
+	node := tree.root
+	for node != nil {
+		if node.value != nil {
+			value = node.value
+		}
+		if key[i]&bit != 0 {
+			node = node.right
+		} else {
+			node = node.left
+		}
+		if mask[i]&bit == 0 {
+			break
+		}
+		if bit >>= 1; bit == 0 {
+			i, bit = i+1, startbyte
+		}
+	}
+	return value
+}
+
 func (tree *Tree) newnode() (p *node) {
 	if tree.free != nil {
 		p = tree.free
 		tree.free = tree.free.right
+
+		// release all prior links
+		p.right = nil
+		p.parent = nil
+		p.left = nil
 		return p
 	}
 
-	// ideally should be aligned in array but for now just let Go decide:
-	return new(node)
+	ln := len(tree.alloc)
+	if ln == cap(tree.alloc) {
+		tree.alloc = append(tree.alloc, make([]node, ln+100)...) // 0, 100, 300, 700, 1500, 3100, 6300 ...
+	}
+	tree.alloc = tree.alloc[:ln+1]
+	return &(tree.alloc[ln])
 }
 
 func loadip4(ipstr string) (uint32, error) {
@@ -263,4 +441,20 @@ func parsecidr4(cidr string) (uint32, uint32, error) {
 		return 0, 0, err
 	}
 	return ip, mask, nil
+}
+
+func parsecidr6(cidr string) (net.IP, net.IPMask, error) {
+	p := strings.IndexByte(cidr, '/')
+	if p > 0 {
+		_, ipm, err := net.ParseCIDR(cidr)
+		if err != nil {
+			return nil, nil, err
+		}
+		return ipm.IP, ipm.Mask, nil
+	}
+	ip := net.ParseIP(cidr)
+	if ip == nil {
+		return nil, nil, ErrBadIP
+	}
+	return ip, net.IPMask{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}, nil
 }
