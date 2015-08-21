@@ -24,9 +24,9 @@ type Tree struct {
 const startbit = uint32(0x80000000)
 
 var (
-	ErrNodeBusy = errors.New("NodeBusy")
-	ErrNotFound = errors.New("NoSuchNode")
-	ErrBadIP    = errors.New("Error in IP address")
+	ErrNodeBusy = errors.New("Node Busy")
+	ErrNotFound = errors.New("No Such Node")
+	ErrBadIP    = errors.New("Bad IP address or mask")
 )
 
 // NewTree creates Tree and preallocates (if preallocate not zero) number of nodes that would be ready to fill with data.
@@ -61,37 +61,28 @@ func NewTree(preallocate int) *Tree {
 	return tree
 }
 
-func parsecidr(cidr string) (uint32, uint32, error) {
-	var mask uint32
-	p := strings.IndexByte(cidr, '/')
-	if p > 0 {
-		for _, c := range cidr[p+1:] {
-			mask = mask*10 + uint32(c-'0')
-		}
-		mask = 0xffffffff << (32 - mask)
-		cidr = cidr[:p]
-	} else {
-		mask = 0xffffffff
-	}
-	ip, err := loadip4(cidr)
-	if err != nil {
-		return 0, 0, err
-	}
-	return ip, mask, nil
-}
-
 // AddCIDR adds value associated with IP/mask to the tree. Will return error for invalid CIDR or if value already exists.
 // Note: Only IPV4 supported so far...
 func (tree *Tree) AddCIDR(cidr string, val interface{}) error {
-	ip, mask, err := parsecidr(cidr)
+	ip, mask, err := parsecidr4(cidr)
 	if err != nil {
 		return err
 	}
 	return tree.insert32(ip, mask, val)
 }
 
+// DeleteCIDR removes value associated with IP/mask from the tree.
+func (tree *Tree) DeleteCIDR(cidr string) error {
+	ip, mask, err := parsecidr4(cidr)
+	if err != nil {
+		return err
+	}
+	return tree.delete32(ip, mask)
+}
+
+// Find CIDR traverses tree to proper Node and returns previously saved information in longest covered IP.
 func (tree *Tree) FindCIDR(cidr string) (interface{}, error) {
-	ip, mask, err := parsecidr(cidr)
+	ip, mask, err := parsecidr4(cidr)
 	if err != nil {
 		return nil, err
 	}
@@ -250,4 +241,26 @@ func loadip4(ipstr string) (uint32, error) {
 		return 0, ErrBadIP
 	}
 	return ip<<8 + oct, nil
+}
+
+func parsecidr4(cidr string) (uint32, uint32, error) {
+	var mask uint32
+	p := strings.IndexByte(cidr, '/')
+	if p > 0 {
+		for _, c := range cidr[p+1:] {
+			if c < '0' || c > '9' {
+				return 0, 0, ErrBadIP
+			}
+			mask = mask*10 + uint32(c-'0')
+		}
+		mask = 0xffffffff << (32 - mask)
+		cidr = cidr[:p]
+	} else {
+		mask = 0xffffffff
+	}
+	ip, err := loadip4(cidr)
+	if err != nil {
+		return 0, 0, err
+	}
+	return ip, mask, nil
 }

@@ -80,4 +80,20 @@ func TestTree(t *testing.T) {
 	if inf.(int) != 2 {
 		t.Errorf("Wrong value, expected 2, got %v", inf)
 	}
+
+	// Delete internal
+	err = tr.DeleteCIDR("1.2.3.0/25")
+	if err != nil {
+		t.Error(err)
+	}
+
+	// Hit covering with old IP
+	inf, err = tr.FindCIDR("1.2.3.0/32")
+	if err != nil {
+		t.Error(err)
+	}
+	if inf.(int) != 2 {
+		t.Errorf("Wrong value, expected 2, got %v", inf)
+	}
+
 }
