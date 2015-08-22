@@ -5,9 +5,9 @@
 package nradix
 
 import (
+	"bytes"
 	"errors"
 	"net"
-	"strings"
 )
 
 type node struct {
@@ -68,7 +68,11 @@ func NewTree(preallocate int) *Tree {
 
 // AddCIDR adds value associated with IP/mask to the tree. Will return error for invalid CIDR or if value already exists.
 func (tree *Tree) AddCIDR(cidr string, val interface{}) error {
-	if strings.IndexByte(cidr, '.') > 0 {
+	return tree.AddCIDRb([]byte(cidr), val)
+}
+
+func (tree *Tree) AddCIDRb(cidr []byte, val interface{}) error {
+	if bytes.IndexByte(cidr, '.') > 0 {
 		ip, mask, err := parsecidr4(cidr)
 		if err != nil {
 			return err
@@ -84,7 +88,11 @@ func (tree *Tree) AddCIDR(cidr string, val interface{}) error {
 
 // DeleteCIDR removes value associated with IP/mask from the tree.
 func (tree *Tree) DeleteCIDR(cidr string) error {
-	if strings.IndexByte(cidr, '.') > 0 {
+	return tree.DeleteCIDRb([]byte(cidr))
+}
+
+func (tree *Tree) DeleteCIDRb(cidr []byte) error {
+	if bytes.IndexByte(cidr, '.') > 0 {
 		ip, mask, err := parsecidr4(cidr)
 		if err != nil {
 			return err
@@ -100,7 +108,11 @@ func (tree *Tree) DeleteCIDR(cidr string) error {
 
 // Find CIDR traverses tree to proper Node and returns previously saved information in longest covered IP.
 func (tree *Tree) FindCIDR(cidr string) (interface{}, error) {
-	if strings.IndexByte(cidr, '.') > 0 {
+	return tree.FindCIDRb([]byte(cidr))
+}
+
+func (tree *Tree) FindCIDRb(cidr []byte) (interface{}, error) {
+	if bytes.IndexByte(cidr, '.') > 0 {
 		ip, mask, err := parsecidr4(cidr)
 		if err != nil {
 			return nil, err
@@ -380,13 +392,16 @@ func (tree *Tree) newnode() (p *node) {
 
 	ln := len(tree.alloc)
 	if ln == cap(tree.alloc) {
-		tree.alloc = append(tree.alloc, make([]node, ln+100)...) // 0, 100, 300, 700, 1500, 3100, 6300 ...
+		// filled one row, make bigger one
+		tree.alloc = make([]node, ln+100)[:1] // 100, 300, 700, 1500, 3100, 6300 ...
+		ln = 0
+	} else {
+		tree.alloc = tree.alloc[:ln+1]
 	}
-	tree.alloc = tree.alloc[:ln+1]
 	return &(tree.alloc[ln])
 }
 
-func loadip4(ipstr string) (uint32, error) {
+func loadip4(ipstr []byte) (uint32, error) {
 	var (
 		ip  uint32
 		oct uint32
@@ -394,7 +409,7 @@ func loadip4(ipstr string) (uint32, error) {
 		num byte
 	)
 
-	for _, b = range []byte(ipstr) {
+	for _, b = range ipstr {
 		switch {
 		case b == '.':
 			num++
@@ -421,9 +436,9 @@ func loadip4(ipstr string) (uint32, error) {
 	return ip<<8 + oct, nil
 }
 
-func parsecidr4(cidr string) (uint32, uint32, error) {
+func parsecidr4(cidr []byte) (uint32, uint32, error) {
 	var mask uint32
-	p := strings.IndexByte(cidr, '/')
+	p := bytes.IndexByte(cidr, '/')
 	if p > 0 {
 		for _, c := range cidr[p+1:] {
 			if c < '0' || c > '9' {
@@ -443,16 +458,16 @@ func parsecidr4(cidr string) (uint32, uint32, error) {
 	return ip, mask, nil
 }
 
-func parsecidr6(cidr string) (net.IP, net.IPMask, error) {
-	p := strings.IndexByte(cidr, '/')
+func parsecidr6(cidr []byte) (net.IP, net.IPMask, error) {
+	p := bytes.IndexByte(cidr, '/')
 	if p > 0 {
-		_, ipm, err := net.ParseCIDR(cidr)
+		_, ipm, err := net.ParseCIDR(string(cidr))
 		if err != nil {
 			return nil, nil, err
 		}
 		return ipm.IP, ipm.Mask, nil
 	}
-	ip := net.ParseIP(cidr)
+	ip := net.ParseIP(string(cidr))
 	if ip == nil {
 		return nil, nil, ErrBadIP
 	}
