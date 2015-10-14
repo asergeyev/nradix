@@ -165,3 +165,20 @@ func TestTree6(t *testing.T) {
 	}
 
 }
+
+func TestRegression6(t *testing.T) {
+	tr := NewTree(0)
+	if tr == nil || tr.root == nil {
+		t.Error("Did not create tree properly")
+	}
+	// in one of the implementations /128 addresses were causing panic...
+	tr.AddCIDR("2620:10f::/32", 54321)
+	tr.AddCIDR("2620:10f:d000:100::5/128", 12345)
+
+	inf, err := tr.FindCIDR("2620:10f:d000:100::5/128")
+	if err != nil {
+		t.Errorf("Could not get /128 address from the tree, error: %s", err)
+	} else if inf.(int) != 12345 {
+		t.Errorf("Wrong value from /128 test, got %d, expected 12345", inf)
+	}
+}

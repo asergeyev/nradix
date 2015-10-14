@@ -120,7 +120,7 @@ func (tree *Tree) FindCIDRb(cidr []byte) (interface{}, error) {
 		return tree.find32(ip, mask), nil
 	}
 	ip, mask, err := parsecidr6(cidr)
-	if err != nil {
+	if err != nil || ip == nil {
 		return nil, err
 	}
 	return tree.find(ip, mask), nil
@@ -139,7 +139,7 @@ func (tree *Tree) insert32(key, mask uint32, value interface{}) error {
 		if next == nil {
 			break
 		}
-		bit >>= 1
+		bit = bit >> 1
 		node = next
 	}
 	if next != nil {
@@ -373,6 +373,11 @@ func (tree *Tree) find(key net.IP, mask net.IPMask) (value interface{}) {
 		}
 		if bit >>= 1; bit == 0 {
 			i, bit = i+1, startbyte
+			if i >= len(key) {
+				// reached depth of the tree, there should be matching node...
+				value = node.value
+				break
+			}
 		}
 	}
 	return value
@@ -393,7 +398,7 @@ func (tree *Tree) newnode() (p *node) {
 	ln := len(tree.alloc)
 	if ln == cap(tree.alloc) {
 		// filled one row, make bigger one
-		tree.alloc = make([]node, ln+100)[:1] // 100, 300, 700, 1500, 3100, 6300 ...
+		tree.alloc = make([]node, ln+200)[:1] // 200, 600, 1400, 3000, 6200, 12600 ...
 		ln = 0
 	} else {
 		tree.alloc = tree.alloc[:ln+1]
