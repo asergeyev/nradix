@@ -375,7 +375,9 @@ func (tree *Tree) find(key net.IP, mask net.IPMask) (value interface{}) {
 			i, bit = i+1, startbyte
 			if i >= len(key) {
 				// reached depth of the tree, there should be matching node...
-				value = node.value
+				if node != nil {
+					value = node.value
+				}
 				break
 			}
 		}
