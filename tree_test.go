@@ -112,6 +112,26 @@ func TestTree(t *testing.T) {
 
 }
 
+func TestRegression(t *testing.T) {
+	tr := NewTree(0)
+	if tr == nil || tr.root == nil {
+		t.Error("Did not create tree properly")
+	}
+
+	tr.AddCIDR("1.1.1.0/24", 1)
+	
+	tr.DeleteCIDR("1.1.1.0/24")
+	tr.AddCIDR("1.1.1.0/25", 2)
+
+	// inside old range, outside new range
+	inf, err := tr.FindCIDR("1.1.1.128")
+	if err != nil {
+		t.Error(err)
+	} else if inf != nil {
+		t.Errorf("Wrong value, expected nil, got %v", inf)
+	}
+}
+
 func TestTree6(t *testing.T) {
 	tr := NewTree(0)
 	if tr == nil || tr.root == nil {

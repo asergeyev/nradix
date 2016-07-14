@@ -394,6 +394,7 @@ func (tree *Tree) newnode() (p *node) {
 		p.right = nil
 		p.parent = nil
 		p.left = nil
+		p.value = nil
 		return p
 	}
 
