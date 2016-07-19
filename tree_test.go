@@ -95,6 +95,15 @@ func TestTree(t *testing.T) {
 		t.Errorf("Wrong value, expected 2, got %v", inf)
 	}
 
+	// Hit both covering and internal, should choose most specific
+	inf, err = tr.FindCIDR("1.2.3.0/32")
+	if err != nil {
+		t.Error(err)
+	}
+	if inf.(int) != 1 {
+		t.Errorf("Wrong value, expected 1, got %v", inf)
+	}
+
 	// Delete internal
 	err = tr.DeleteCIDR("1.2.3.0/25")
 	if err != nil {
@@ -110,6 +119,148 @@ func TestTree(t *testing.T) {
 		t.Errorf("Wrong value, expected 2, got %v", inf)
 	}
 
+	// Add internal back in
+	err = tr.AddCIDR("1.2.3.0/25", 1)
+	if err != nil {
+		t.Error(err)
+	}
+
+	// Delete covering
+	err = tr.DeleteCIDR("1.2.3.0/24")
+	if err != nil {
+		t.Error(err)
+	}
+
+	// Hit with old IP
+	inf, err = tr.FindCIDR("1.2.3.0/32")
+	if err != nil {
+		t.Error(err)
+	}
+	if inf.(int) != 1 {
+		t.Errorf("Wrong value, expected 1, got %v", inf)
+	}
+
+	// Find covering again
+	inf, err = tr.FindCIDR("1.2.3.0/24")
+	if err != nil {
+		t.Error(err)
+	}
+	if inf != nil {
+		t.Errorf("Wrong value, expected nil, got %v", inf)
+	}
+
+	// Add covering back in
+	err = tr.AddCIDR("1.2.3.0/24", 2)
+	if err != nil {
+		t.Error(err)
+	}
+	inf, err = tr.FindCIDR("1.2.3.0/24")
+	if err != nil {
+		t.Error(err)
+	}
+	if inf.(int) != 2 {
+		t.Errorf("Wrong value, expected 2, got %v", inf)
+	}
+
+	// Delete the whole range
+	err = tr.DeleteWholeRangeCIDR("1.2.3.0/24")
+	if err != nil {
+		t.Error(err)
+	}
+	// should be no value for covering
+	inf, err = tr.FindCIDR("1.2.3.0/24")
+	if err != nil {
+		t.Error(err)
+	}
+	if inf != nil {
+		t.Errorf("Wrong value, expected nil, got %v", inf)
+	}
+	// should be no value for internal
+	inf, err = tr.FindCIDR("1.2.3.0/32")
+	if err != nil {
+		t.Error(err)
+	}
+	if inf != nil {
+		t.Errorf("Wrong value, expected nil, got %v", inf)
+	}
+}
+
+func TestSet(t *testing.T) {
+	tr := NewTree(0)
+	if tr == nil || tr.root == nil {
+		t.Error("Did not create tree properly")
+	}
+
+	tr.AddCIDR("1.1.1.0/24", 1)
+	inf, err := tr.FindCIDR("1.1.1.0")
+	if err != nil {
+		t.Error(err)
+	}
+	if inf.(int) != 1 {
+		t.Errorf("Wrong value, expected 1, got %v", inf)
+	}
+
+	tr.AddCIDR("1.1.1.0/25", 2)
+	inf, err = tr.FindCIDR("1.1.1.0")
+	if err != nil {
+		t.Error(err)
+	}
+	if inf.(int) != 2 {
+		t.Errorf("Wrong value, expected 2, got %v", inf)
+	}
+	inf, err = tr.FindCIDR("1.1.1.0/24")
+	if err != nil {
+		t.Error(err)
+	}
+	if inf.(int) != 1 {
+		t.Errorf("Wrong value, expected 1, got %v", inf)
+	}
+
+	// add covering should fail
+	err = tr.AddCIDR("1.1.1.0/24", 60)
+	if err != ErrNodeBusy {
+		t.Errorf("Should have gotten ErrNodeBusy, instead got err: %v", err)
+	}
+
+	// set covering
+	err = tr.SetCIDR("1.1.1.0/24", 3)
+	if err != nil {
+		t.Error(err)
+	}
+	inf, err = tr.FindCIDR("1.1.1.0")
+	if err != nil {
+		t.Error(err)
+	}
+	if inf.(int) != 2 {
+		t.Errorf("Wrong value, expected 2, got %v", inf)
+	}
+	inf, err = tr.FindCIDR("1.1.1.0/24")
+	if err != nil {
+		t.Error(err)
+	}
+	if inf.(int) != 3 {
+		t.Errorf("Wrong value, expected 3, got %v", inf)
+	}
+
+	// set internal
+	err = tr.SetCIDR("1.1.1.0/25", 4)
+	if err != nil {
+		t.Error(err)
+	}
+	inf, err = tr.FindCIDR("1.1.1.0")
+	if err != nil {
+		t.Error(err)
+	}
+	if inf.(int) != 4 {
+		t.Errorf("Wrong value, expected 4, got %v", inf)
+	}
+	inf, err = tr.FindCIDR("1.1.1.0/24")
+	if err != nil {
+		t.Error(err)
+	}
+	if inf.(int) != 3 {
+		t.Errorf("Wrong value, expected 3, got %v", inf)
+	}
 }
 
 func TestRegression(t *testing.T) {
@@ -119,7 +270,7 @@ func TestRegression(t *testing.T) {
 	}
 
 	tr.AddCIDR("1.1.1.0/24", 1)
-	
+
 	tr.DeleteCIDR("1.1.1.0/24")
 	tr.AddCIDR("1.1.1.0/25", 2)
 

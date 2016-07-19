@@ -55,7 +55,7 @@ func NewTree(preallocate int) *Tree {
 		mask |= startbit
 
 		for {
-			tree.insert32(key, mask, nil)
+			tree.insert32(key, mask, nil, false)
 			key += inc
 			if key == 0 { // magic bits collide
 				break
@@ -77,13 +77,54 @@ func (tree *Tree) AddCIDRb(cidr []byte, val interface{}) error {
 		if err != nil {
 			return err
 		}
-		return tree.insert32(ip, mask, val)
+		return tree.insert32(ip, mask, val, false)
 	}
 	ip, mask, err := parsecidr6(cidr)
 	if err != nil {
 		return err
 	}
-	return tree.insert(ip, mask, val)
+	return tree.insert(ip, mask, val, false)
+}
+
+// AddCIDR adds value associated with IP/mask to the tree. Will return error for invalid CIDR or if value already exists.
+func (tree *Tree) SetCIDR(cidr string, val interface{}) error {
+	return tree.SetCIDRb([]byte(cidr), val)
+}
+
+func (tree *Tree) SetCIDRb(cidr []byte, val interface{}) error {
+	if bytes.IndexByte(cidr, '.') > 0 {
+		ip, mask, err := parsecidr4(cidr)
+		if err != nil {
+			return err
+		}
+		return tree.insert32(ip, mask, val, true)
+	}
+	ip, mask, err := parsecidr6(cidr)
+	if err != nil {
+		return err
+	}
+	return tree.insert(ip, mask, val, true)
+}
+
+// DeleteWholeRangeCIDR removes all values associated with IPs
+// in the entire subnet specified by the CIDR.
+func (tree *Tree) DeleteWholeRangeCIDR(cidr string) error {
+	return tree.DeleteWholeRangeCIDRb([]byte(cidr))
+}
+
+func (tree *Tree) DeleteWholeRangeCIDRb(cidr []byte) error {
+	if bytes.IndexByte(cidr, '.') > 0 {
+		ip, mask, err := parsecidr4(cidr)
+		if err != nil {
+			return err
+		}
+		return tree.delete32(ip, mask, true)
+	}
+	ip, mask, err := parsecidr6(cidr)
+	if err != nil {
+		return err
+	}
+	return tree.delete(ip, mask, true)
 }
 
 // DeleteCIDR removes value associated with IP/mask from the tree.
@@ -97,13 +138,13 @@ func (tree *Tree) DeleteCIDRb(cidr []byte) error {
 		if err != nil {
 			return err
 		}
-		return tree.delete32(ip, mask)
+		return tree.delete32(ip, mask, false)
 	}
 	ip, mask, err := parsecidr6(cidr)
 	if err != nil {
 		return err
 	}
-	return tree.delete(ip, mask)
+	return tree.delete(ip, mask, false)
 }
 
 // Find CIDR traverses tree to proper Node and returns previously saved information in longest covered IP.
@@ -126,7 +167,7 @@ func (tree *Tree) FindCIDRb(cidr []byte) (interface{}, error) {
 	return tree.find(ip, mask), nil
 }
 
-func (tree *Tree) insert32(key, mask uint32, value interface{}) error {
+func (tree *Tree) insert32(key, mask uint32, value interface{}, overwrite bool) error {
 	bit := startbit
 	node := tree.root
 	next := tree.root
@@ -143,7 +184,7 @@ func (tree *Tree) insert32(key, mask uint32, value interface{}) error {
 		node = next
 	}
 	if next != nil {
-		if node.value != nil {
+		if node.value != nil && !overwrite {
 			return ErrNodeBusy
 		}
 		node.value = value
@@ -165,7 +206,7 @@ func (tree *Tree) insert32(key, mask uint32, value interface{}) error {
 	return nil
 }
 
-func (tree *Tree) insert(key net.IP, mask net.IPMask, value interface{}) error {
+func (tree *Tree) insert(key net.IP, mask net.IPMask, value interface{}, overwrite bool) error {
 	if len(key) != len(mask) {
 		return ErrBadIP
 	}
@@ -195,7 +236,7 @@ func (tree *Tree) insert(key net.IP, mask net.IPMask, value interface{}) error {
 
 	}
 	if next != nil {
-		if node.value != nil {
+		if node.value != nil && !overwrite {
 			return ErrNodeBusy
 		}
 		node.value = value
@@ -223,7 +264,7 @@ func (tree *Tree) insert(key net.IP, mask net.IPMask, value interface{}) error {
 	return nil
 }
 
-func (tree *Tree) delete32(key, mask uint32) error {
+func (tree *Tree) delete32(key, mask uint32, wholeRange bool) error {
 	bit := startbit
 	node := tree.root
 	for node != nil && bit&mask != 0 {
@@ -238,7 +279,7 @@ func (tree *Tree) delete32(key, mask uint32) error {
 		return ErrNotFound
 	}
 
-	if node.right != nil && node.left != nil {
+	if !wholeRange && (node.right != nil || node.left != nil) {
 		// keep it just trim value
 		if node.value != nil {
 			node.value = nil
@@ -271,7 +312,7 @@ func (tree *Tree) delete32(key, mask uint32) error {
 	return nil
 }
 
-func (tree *Tree) delete(key net.IP, mask net.IPMask) error {
+func (tree *Tree) delete(key net.IP, mask net.IPMask, wholeRange bool) error {
 	if len(key) != len(mask) {
 		return ErrBadIP
 	}
@@ -296,7 +337,7 @@ func (tree *Tree) delete(key net.IP, mask net.IPMask) error {
 		return ErrNotFound
 	}
 
-	if node.right != nil && node.left != nil {
+	if !wholeRange && (node.right != nil || node.left != nil) {
 		// keep it just trim value
 		if node.value != nil {
 			node.value = nil
@@ -315,7 +356,6 @@ func (tree *Tree) delete(key net.IP, mask net.IPMask) error {
 		// reserve this node for future use
 		node.right = tree.free
 		tree.free = node
-		node.value = nil
 
 		// move to parent, check if it's free of value and children
 		node = node.parent
