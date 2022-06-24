@@ -167,6 +167,13 @@ func (tree *Tree) FindCIDRb(cidr []byte) (interface{}, error) {
 	return tree.find(ip, mask), nil
 }
 
+func (tree *Tree) FindIPv6CIDR(key net.IP, mask net.IPMask) interface{} {
+	if mask == nil {
+		mask = net.IPMask{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
+	}
+	return tree.find(key, mask)
+}
+
 func (tree *Tree) insert32(key, mask uint32, value interface{}, overwrite bool) error {
 	bit := startbit
 	node := tree.root
